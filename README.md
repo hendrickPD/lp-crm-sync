@@ -13,57 +13,75 @@ A Claude Code skill that automates the "Slack capture → Affinity CRM → follo
 
 The skill is designed to run weekly — either on-demand or on a schedule.
 
-## Prerequisites
-
-- **Claude Code** with a Slack MCP connector configured (any flavor — the skill detects available Slack tools at runtime)
-- **Affinity API key** — generate at Affinity → Settings → API. Any admin on your workspace can create one. Keep it out of version control.
-- **Claude Code skill support** — drop this directory into your skills path or install it via whatever skill-management mechanism your setup uses
-
-## Setup
-
-### 1. Clone or copy this directory
+## Install (one-liner)
 
 ```bash
-git clone <your-fork-url> ~/pd-lp-crm-skill
-# or copy the files into your preferred skills directory
+curl -sSL https://raw.githubusercontent.com/hendrickPD/lp-crm-sync/main/install.sh | bash
 ```
 
-### 2. Configure your environment
+This clones the skill, symlinks it into `~/.claude/skills/lp-crm-sync` so Claude Code discovers it, creates a `.env` with Palm Drive's channel/list defaults and a placeholder for your Affinity key, `chmod`s the file to `600`, and adds a line to `~/.zshrc` so every new shell (including scheduled headless runs) picks up the env vars automatically.
 
-Copy `.env.example` to `.env` (which is gitignored) and fill in your values:
+The installer is idempotent — safe to rerun. It won't overwrite an existing `.env`.
+
+Prefer to read the script first (recommended for anyone who hasn't met it before)?
 
 ```bash
-cp .env.example .env
-$EDITOR .env
+curl -sSL https://raw.githubusercontent.com/hendrickPD/lp-crm-sync/main/install.sh -o /tmp/lp-install.sh
+less /tmp/lp-install.sh
+bash /tmp/lp-install.sh
 ```
 
-Required variables:
-- `AFFINITY_API_KEY` — your Affinity API key (treat like a password)
-- `LP_NOTES_CHANNEL_ID` — Slack channel ID for raw LP notes (get from the channel's Slack URL)
-- `LP_CRM_CHANNEL_ID` — Slack channel ID where the skill posts reports and reads feedback
-- `AFFINITY_LP_LIST_ID` — numeric ID of your Affinity list tracking LPs
+## After install — three manual steps
 
-To find the Affinity list ID, run:
+1. **Paste your Affinity API key** into `~/pd-lp-crm-skill/.env` over the `PASTE_YOUR_KEY_HERE` placeholder.
+
+   Get a key at `https://<your-subdomain>.affinity.co/settings/manage-apps` → **Generate API key**. It's shown once only — treat like a password.
+
+   Palm Drive colleagues: https://palmdrive.affinity.co/settings/manage-apps
+
+2. **Load env vars into your current shell** (new shells get them automatically via `.zshrc`):
+
+   ```bash
+   set -a; source ~/pd-lp-crm-skill/.env; set +a
+   ```
+
+3. **Verify the key works**:
+
+   ```bash
+   curl -s https://api.affinity.co/v2/auth/whoami \
+     -H "Authorization: Bearer $AFFINITY_API_KEY" | python3 -m json.tool
+   ```
+
+   Expect JSON with your tenant name and `"scopes": ["api"]`. A `401` usually means a trailing newline in `.env`.
+
+Then in Claude Code: *"Run the lp-crm-sync skill."*
+
+## Prerequisites (what the installer assumes)
+
+- **Claude Code** installed and working (`claude --version` should respond)
+- **Slack MCP connector** already configured — check with `/mcp` in any Claude Code session. Any connector that exposes channel read/write works. The bot needs to be invited to both your LP notes channel and your feedback channel.
+- **Admin access to Affinity** (or a colleague who can generate you a key)
+- **Git** available on your PATH
+
+## If you're not at Palm Drive
+
+The installer bakes in Palm Drive's channel IDs and Affinity list ID as `.env` defaults — useful shorthand for colleagues, wrong for anyone else. After running the installer, edit `~/pd-lp-crm-skill/.env` and replace:
+
+- `LP_NOTES_CHANNEL_ID` — open your LP notes channel in Slack web, copy the trailing ID from the URL
+- `LP_CRM_CHANNEL_ID` — same, for the channel where you want the skill to post reports and read feedback
+- `AFFINITY_LP_LIST_ID` — discover with `curl -s https://api.affinity.co/lists -H "Authorization: Bearer $AFFINITY_API_KEY"`, then pick the list whose `name` matches your LP tracker
+
+## Manual install (without the one-liner)
 
 ```bash
-curl -s https://api.affinity.co/lists \
-  -H "Authorization: Bearer $AFFINITY_API_KEY" | python3 -m json.tool
+git clone https://github.com/hendrickPD/lp-crm-sync.git ~/pd-lp-crm-skill
+mkdir -p ~/.claude/skills
+ln -s ~/pd-lp-crm-skill ~/.claude/skills/lp-crm-sync
+cp ~/pd-lp-crm-skill/.env.example ~/pd-lp-crm-skill/.env
+chmod 600 ~/pd-lp-crm-skill/.env
+$EDITOR ~/pd-lp-crm-skill/.env   # fill in all values
+echo '[ -f ~/pd-lp-crm-skill/.env ] && set -a && source ~/pd-lp-crm-skill/.env && set +a' >> ~/.zshrc
 ```
-
-Find the list whose `name` matches your LP tracker (e.g., "LPs", "Fund V LPs") and note its `id`.
-
-Then source the file before running Claude Code:
-
-```bash
-set -a; source .env; set +a
-claude
-```
-
-(Or use `direnv` or your preferred env manager.)
-
-### 3. Verify the Slack MCP is connected
-
-In Claude Code, run `/mcp` and confirm a Slack connector shows up. If not, add one — any Slack MCP that exposes `slack_read_channel` and `slack_send_message` will work.
 
 ## Usage
 

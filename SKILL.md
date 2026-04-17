@@ -17,25 +17,81 @@ Trigger this skill when the user asks any of:
 - "Run the weekly LP CRM routine"
 - "Give me the top N cold-but-interesting LPs"
 
-## Prerequisites
+## Preflight — run this BEFORE anything else, every single invocation
 
-Before running, verify all three are in place. If any are missing, stop and explain what the user needs to set up — **do not fall back to hardcoded values**.
+Every time this skill triggers, run the four checks below in order. The first one that fails: stop, give the user the specific recovery instructions for that check, and do not continue. Do not silently paper over missing config by asking the user to paste secrets inline, and never fall back to hardcoded values.
 
-1. **Affinity API key** — read from `AFFINITY_API_KEY` environment variable. If unset, ask the user to paste it for this session only (keep it in a shell variable, never write it to a file). See `references/affinity-api-cheatsheet.md` for how to obtain one.
-2. **Slack MCP connector** — any Slack MCP the user has connected. Check for tool names containing `slack_read_channel`, `slack_send_message`, and `slack_search_channels`. If none are available, ask the user to connect a Slack MCP before proceeding.
-3. **Configuration env vars:**
-   - `LP_NOTES_CHANNEL_ID` — Slack channel ID where the team captures raw LP notes (e.g. `GRKEM91EK`)
-   - `LP_CRM_CHANNEL_ID` — Slack channel ID where this skill posts reports and reads feedback (e.g. `C0ATD562S9K`)
-   - `AFFINITY_LP_LIST_ID` — numeric Affinity list ID for the LP pipeline (e.g. `254501`). To find it, `curl https://api.affinity.co/lists -H "Authorization: Bearer $AFFINITY_API_KEY"` and pick the list whose `name` matches the user's LP tracker.
+A clean preflight pass should take <5 seconds. Don't skip it "because we ran it recently" — a lot can change between invocations (token revoked, MCP disconnected, channel renamed).
 
-If any env var is unset, ask the user for it and use the value for the current session only. Do not write secrets to disk.
+### Check 1 — Affinity API key is set and working
+
+Verify both that `AFFINITY_API_KEY` is in the environment AND that it actually authenticates:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" https://api.affinity.co/v2/auth/whoami \
+  -H "Authorization: Bearer $AFFINITY_API_KEY"
+```
+
+Expect `200`. On anything else (unset variable, 401, 403), show this recovery block:
+
+> I can't reach Affinity. Here's how to set up the API key:
+> 1. Log in to Affinity as an admin (or ask an admin on your workspace).
+> 2. Go to **Settings → API**. URL pattern: `https://<your-subdomain>.affinity.co/settings/manage-apps`
+>    - Palm Drive colleagues: https://palmdrive.affinity.co/settings/manage-apps
+> 3. Click **Generate API key** and copy it immediately — shown only once.
+> 4. Save it in `~/pd-lp-crm-skill/.env` as `AFFINITY_API_KEY=<your key>` (create the file if it doesn't exist — the installer does this for you).
+> 5. `chmod 600 ~/pd-lp-crm-skill/.env` so only you can read it.
+> 6. Load it into your shell: `set -a; source ~/pd-lp-crm-skill/.env; set +a`
+> 7. For persistent loading (required for scheduled headless runs), add this to `~/.zshrc`:
+>    `[ -f ~/pd-lp-crm-skill/.env ] && set -a && source ~/pd-lp-crm-skill/.env && set +a`
+>
+> After fixing, ask me to run the skill again.
+
+Treat the key as a secret. Do not echo it in the terminal, do not paste it into Slack, do not include it in error messages, do not write it anywhere other than `.env`. If the user pastes it into chat, remind them to rotate after the task completes.
+
+### Check 2 — Slack MCP is connected with the tools we need
+
+Look at the tools available this session. The skill needs Slack tools covering read, write, and search — names vary by MCP flavor but typically look like `slack_read_channel` / `slack_send_message` / `slack_search_channels` (possibly with a workspace prefix). If none match:
+
+> The Slack MCP connector isn't available in this session. Recovery:
+> 1. In Claude Code, run `/mcp` to see configured connectors.
+> 2. If no Slack connector is listed, add one (any Slack MCP that exposes channel read/write works).
+> 3. Once connected, invite the bot to both your LP notes channel and your feedback channel. Inside each channel in Slack: `/invite @<bot-name>`.
+> 4. Restart this chat / resume, and ask me to run the skill again.
+
+### Check 3 — Config env vars are set
+
+Verify `LP_NOTES_CHANNEL_ID`, `LP_CRM_CHANNEL_ID`, and `AFFINITY_LP_LIST_ID` are all set and non-empty.
+
+Palm Drive reference values: `LP_NOTES_CHANNEL_ID=GRKEM91EK`, `LP_CRM_CHANNEL_ID=C0ATD562S9K`, `AFFINITY_LP_LIST_ID=254501`. Other teams will have their own — these are just examples.
+
+If any are missing:
+
+> Config incomplete. Set these in `~/pd-lp-crm-skill/.env`:
+> - `LP_NOTES_CHANNEL_ID` — Slack channel where raw LP notes are captured. Open the channel in Slack web and copy the trailing ID from the URL (e.g. `https://palmdrive.slack.com/archives/GRKEM91EK` → `GRKEM91EK`).
+> - `LP_CRM_CHANNEL_ID` — Slack channel where this skill posts reports and reads feedback. Same method.
+> - `AFFINITY_LP_LIST_ID` — numeric Affinity list ID. Discover with:
+>   ```
+>   curl -s https://api.affinity.co/lists -H "Authorization: Bearer $AFFINITY_API_KEY" | python3 -m json.tool
+>   ```
+>   Find the list whose `name` matches your LP tracker and copy its `id`.
+>
+> Then re-source: `set -a; source ~/pd-lp-crm-skill/.env; set +a`
+
+### Check 4 — Slack bot has access to both channels
+
+Try a 1-message read on each configured channel. On `not_in_channel` or similar:
+
+> The Slack MCP bot isn't a member of `<channel-id>`. Inside that channel in Slack, run `/invite @<bot-name>` and ask me to retry.
 
 ## Security rules
 
-- **Never commit any secret** (API keys, channel IDs that the user considers sensitive) to version control.
-- **Never write secrets to files** — not `.env`, not config.json, not anywhere. Hold them in shell variables during execution.
-- **Never post the API key to Slack**, even in error messages.
-- If the user pastes a key into a Slack-connected chat, remind them that the chat transcript now contains the key and recommend rotation after the task completes.
+These apply throughout every run, not just preflight.
+
+- **The skill itself never writes secrets.** `AFFINITY_API_KEY` is read from the environment; the skill never echoes it, never writes it to files, never passes it back to the user. The user's own `.env` (populated by the installer) is their responsibility — if you touch it at all, only to suggest what should be in it.
+- **`.env` stays out of git.** The repo's `.gitignore` blocks `.env`, `*.key`, `*.secret`. Don't circumvent it and don't advise the user to commit a key.
+- **No secrets in Slack messages.** Not the API key, not any env-var contents, not even in error messages posted to `$LP_CRM_CHANNEL_ID`.
+- **If the user pastes a key into chat**, flag that the transcript now contains it and recommend they rotate after the task finishes. Chat transcripts persist locally and pass through the API.
 
 ## Workflow
 
