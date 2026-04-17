@@ -143,13 +143,10 @@ After writes complete, post a brief confirmation to LP_CRM ("✅ Added 12 new en
 
 ## Running on a schedule
 
-This skill is designed to be run weekly. Two paths:
+This skill is designed to be run weekly, but the *when* is intentionally not baked in — different teams have different rhythms and timezones.
 
-1. **Manual / on-demand** — user invokes by asking Claude "run the LP CRM routine"
-2. **Scheduled** — set up via the Claude Code `schedule` skill (or a cron job) to invoke this skill weekly and post to the LP_CRM channel
-
-Sample schedule invocation prompt (what cron would pass to Claude):
-> "Run the lp-crm-sync skill. Read the last 7 days of the LP notes channel and the LP_CRM channel, cross-reference with Affinity, and post an updated top-10 cold list with fresh drafts. If I've replied 'go' since last run, execute the pending consolidation."
+- **Manual / on-demand** — ask Claude "run the LP CRM routine" whenever you want it
+- **Scheduled** — see the companion project [lp-crm-sync-schedule](https://github.com/hendrickPD/lp-crm-sync-schedule) for a weekly Monday-morning setup you can copy or adapt. It ships with an opinionated prompt and install instructions for the Claude Code `scheduled-tasks` MCP tool.
 
 ## Failure modes and recovery
 

@@ -78,13 +78,7 @@ The skill posts a report to `LP_CRM_CHANNEL_ID` with a top-10 cold list, follow-
 
 ## Running on a schedule
 
-To run this weekly without needing to invoke it manually, use the `schedule` skill in Claude Code:
-
-```
-/schedule create weekly "Run the lp-crm-sync skill. Read the last 7 days of the LP notes channel, update the top-10 cold-but-interesting list, and post fresh drafts to LP_CRM. If I've replied 'go' since last run, execute the pending Affinity consolidation."
-```
-
-Or set up a local cron / launchd job that invokes `claude -p "<the prompt above>"`.
+Scheduling is deliberately kept out of this repo so the skill stays portable. See the companion project [lp-crm-sync-schedule](https://github.com/hendrickPD/lp-crm-sync-schedule) for a ready-to-install weekly Monday-morning cadence. You can fork it to customize day/time or skip it entirely and invoke the skill manually.
 
 ## Security
 
